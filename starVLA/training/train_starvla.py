@@ -38,15 +38,23 @@ from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, normalize_dotlist_args
 
-deepspeed_plugin = DeepSpeedPlugin()
-accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
-accelerator.print(accelerator.state)
-
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+def create_accelerator(cfg) -> Accelerator:
+    """Create Accelerator after CLI/YAML config merge so trainer overrides take effect."""
+    grad_accum = int(cfg.trainer.get("gradient_accumulation_steps", 1))
+    deepspeed_plugin = DeepSpeedPlugin(gradient_accumulation_steps=grad_accum)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=grad_accum,
+        deepspeed_plugin=deepspeed_plugin,
+    )
+    accelerator.print(accelerator.state)
+    return accelerator
 
 
 def load_fast_tokenizer():
@@ -403,6 +411,7 @@ class VLATrainer(TrainerUtils):
 
 
 def main(cfg) -> None:
+    accelerator = create_accelerator(cfg)
     logger.info("VLA Training :: Warming Up")
 
     cfg = wrap_config(cfg)
