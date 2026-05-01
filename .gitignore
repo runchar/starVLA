@@ -246,8 +246,10 @@ tmp
 !docs/model_zoo.md
 !docs/starVLA_guideline.md
 !docs/WM4A.md
+!doc/*.md
+!doc/Qwen-short-MEM-process.md
 
-
+tests/
 logs/*
 **/.nf*
 code

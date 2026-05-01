@@ -38,6 +38,11 @@ def make_LeRobotSingleDataset(
     
     data_config = ROBOT_TYPE_CONFIG_MAP[robot_type]
     modality_config = data_config.modality_config()
+    if data_cfg and data_cfg.get("image_history_frames", 1) not in [None, 1, "1"]:
+        history_frames = int(data_cfg.get("image_history_frames"))
+        modality_config["video"] = modality_config["video"].model_copy(
+            update={"delta_indices": list(range(-(history_frames - 1), 1))}
+        )
     transforms = data_config.transform()
     dataset_path = data_root_dir / data_name
     if robot_type not in ROBOT_TYPE_TO_EMBODIMENT_TAG:

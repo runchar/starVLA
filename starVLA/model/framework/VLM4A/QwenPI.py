@@ -119,7 +119,10 @@ class Qwen_PI(baseframework):
         self.qwen_vl_interface = get_vlm_model(config=self.config)
 
         # dynamic get llm config
-        num_vl_layers, llm_hidden_size = 36, self.qwen_vl_interface.model.config.hidden_size
+        action_model_cfg = self.config.framework.action_model
+        diffusion_model_cfg = action_model_cfg.get("diffusion_model_cfg", {})
+        num_vl_layers = diffusion_model_cfg.get("num_layers", 36)
+        llm_hidden_size = self.qwen_vl_interface.model.config.hidden_size
         self.config.framework.qwenvl.vl_hidden_dim = llm_hidden_size
         self.config.framework.qwenvl.num_vl_layers = num_vl_layers
 
@@ -155,13 +158,20 @@ class Qwen_PI(baseframework):
                 action_loss (torch.Tensor): Scalar diffusion noise prediction loss.
         """
         batch_images = [example["image"] for example in examples]  #  [B，[PLT]]
+        batch_image_history = (
+            [example.get("image_history") for example in examples] if "image_history" in examples[0] else None
+        )
         instructions = [example["lang"] for example in examples]  # [B, str]
         actions = [example["action"] for example in examples]  # label [B， len, 7]
 
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # [B, 1, state_dim]
 
         # Step 1: QWenVL input format
-        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
+            images=batch_images,
+            instructions=instructions,
+            image_history=batch_image_history,
+        )
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -226,6 +236,9 @@ class Qwen_PI(baseframework):
             examples = [examples]
 
         batch_images = [to_pil_preserve(example["image"]) for example in examples]  #  [B，[PLT]]
+        batch_image_history = (
+            [example.get("image_history") for example in examples] if "image_history" in examples[0] else None
+        )
         instructions = [example["lang"] for example in examples]  # [B, str]
 
         state = [example["state"] for example in examples] if "state" in examples[0] else None  # [B, 1, state_dim]
@@ -235,7 +248,11 @@ class Qwen_PI(baseframework):
             batch_images = resize_images(batch_images, target_size=train_obs_image_size)
 
         # Step 1: QWenVL input format
-        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
+            images=batch_images,
+            instructions=instructions,
+            image_history=batch_image_history,
+        )
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
