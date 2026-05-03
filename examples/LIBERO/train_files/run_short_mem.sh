@@ -20,18 +20,20 @@ accelerate launch \
   --framework.qwenvl.shortmem.temporal_interval 4 \
   --framework.qwenvl.shortmem.prune_after_layer 4 \
   --datasets.vla_data.data_root_dir playground/Datasets/LEROBOT_LIBERO_DATA \
-  --datasets.vla_data.data_mix libero_goal \
-  --datasets.vla_data.per_device_batch_size 2 \
+  --datasets.vla_data.data_mix libero_all \
+  --datasets.vla_data.per_device_batch_size 4 \
   --datasets.vla_data.image_history_frames 6 \
   --datasets.vla_data.video_backend torchvision_av \
   --trainer.freeze_modules ${freeze_module_list} \
-  --trainer.max_train_steps 12000 \
-  --trainer.num_warmup_steps 100 \
+  --trainer.max_train_steps 13000 \
   --trainer.save_interval 500 \
-  --trainer.eval_interval 999999 \
-  --trainer.logging_frequency 50 \
+  --trainer.eval_interval 100 \
+  --trainer.logging_frequency 10 \
   --trainer.gradient_accumulation_steps 8 \
+  --trainer.is_resume true \
   --run_root_dir playground/Checkpoints \
-  --run_id qwenpi_shortmem_qwen3_2b_libero_goal \
+  --run_id qwenpi_qwen3_2b_libero_all_bz32 \
   --wandb_project starVLA_Libero_shortmem \
   --wandb_entity runchar
+
+#  trainer.is_resume=true
