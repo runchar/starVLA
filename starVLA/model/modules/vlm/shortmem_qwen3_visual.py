@@ -41,10 +41,11 @@ class ShortMemContext:
 
 
 class PatchTemporalCausalAttention(nn.Module):
-    def __init__(self, hidden_size: int, num_heads: int):
+    def __init__(self, hidden_size: int, num_heads: int, gate_init: float = 1.0):
         super().__init__()
         self.norm = nn.LayerNorm(hidden_size)
         self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.gate = nn.Parameter(torch.tensor(float(gate_init)))
 
     def forward(self, hidden_states: torch.Tensor, num_items: int, history_frames: int, tokens_per_frame: int):
         hidden_size = hidden_states.shape[-1]
@@ -57,7 +58,7 @@ class PatchTemporalCausalAttention(nn.Module):
         normed = self.norm(temporal_sequences)
         mask = build_temporal_causal_mask(history_frames, hidden_states.device)
         attended, _ = self.attn(normed, normed, normed, attn_mask=mask, need_weights=False)
-        temporal_sequences = temporal_sequences + attended
+        temporal_sequences = temporal_sequences + self.gate * attended
         return temporal_sequences.reshape(num_items, tokens_per_frame, history_frames, hidden_size).permute(
             0, 2, 1, 3
         ).reshape(num_items * history_frames * tokens_per_frame, hidden_size)
@@ -70,12 +71,14 @@ class ShortMemQwen3VisionModel(nn.Module):
         history_frames: int = 4,
         temporal_interval: int = 4,
         prune_after_layer: Optional[int] = None,
+        temporal_gate_init: float = 1.0,
     ):
         super().__init__()
         self.base_visual = base_visual
         self.history_frames = history_frames
         self.temporal_interval = temporal_interval
         self.prune_after_layer = prune_after_layer
+        self.temporal_gate_init = temporal_gate_init
         self._shortmem_context: ShortMemContext | None = None
 
         self.spatial_merge_size = base_visual.spatial_merge_size
@@ -98,6 +101,7 @@ class ShortMemQwen3VisionModel(nn.Module):
                 self.temporal_attn[str(layer_idx)] = PatchTemporalCausalAttention(
                     config.hidden_size,
                     config.num_heads,
+                    gate_init=temporal_gate_init,
                 )
 
     @property

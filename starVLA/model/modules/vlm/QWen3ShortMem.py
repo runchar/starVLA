@@ -76,14 +76,23 @@ def _as_bool(value) -> bool:
     return bool(value)
 
 
+def _as_float(value) -> float:
+    return float(value)
+
+
 class _QWen3ShortMem_VL_Interface(nn.Module):
     def __init__(self, config: Optional[dict] = None, **kwargs):
         super().__init__()
 
         qwenvl_config = config.framework.get("qwenvl", {})
         shortmem_config = _cfg_get(qwenvl_config, "shortmem", {})
+        framework_name = _cfg_get(config.framework, "name", "")
         model_id = _cfg_get(qwenvl_config, "base_vlm", "Qwen/Qwen3-VL-4B-Instruct")
         attn_implementation = _cfg_get(qwenvl_config, "attn_implementation", "sdpa")
+        default_temporal_gate_init = 0.0 if framework_name == "QwenOFTShortMEM" else 1.0
+        temporal_gate_init = _as_float(
+            _cfg_get(shortmem_config, "temporal_gate_init", default_temporal_gate_init)
+        )
         enable_grad_ckpt = _as_bool(
             _cfg_get(
                 qwenvl_config,
@@ -121,6 +130,7 @@ class _QWen3ShortMem_VL_Interface(nn.Module):
             history_frames=int(_cfg_get(shortmem_config, "history_frames", 4)),
             temporal_interval=int(_cfg_get(shortmem_config, "temporal_interval", 4)),
             prune_after_layer=_cfg_get(shortmem_config, "prune_after_layer", 20),
+            temporal_gate_init=temporal_gate_init,
         )
 
         processor = AutoProcessor.from_pretrained(model_id)

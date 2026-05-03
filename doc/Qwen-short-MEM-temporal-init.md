@@ -160,6 +160,22 @@ for module in model.qwen_vl_interface.model.model.visual.temporal_attn.values():
 - 训练若干 step 后，`gate` 应从 0 开始产生非零更新。
 - `temporal_attn.*.gate` 和 `temporal_attn.*.attn.*` 参数应在未冻结参数组中。
 
+## 实现状态
+
+2026-05-03 已在 OFTShortMEM 路线上实现 zero-gate 初始化：
+
+- `PatchTemporalCausalAttention` 增加 `gate` 参数。
+- `QwenOFTShortMEM` 默认使用 `temporal_gate_init=0.0`。
+- 其他 ShortMEM framework 默认仍使用 `temporal_gate_init=1.0`，尽量保持历史行为。
+- 可通过 `--framework.qwenvl.shortmem.temporal_gate_init 0.0` 显式覆盖。
+
+OFTShortMEM 已通过单元测试和 2-step temporal train smoke：
+
+```text
+Step 1, Loss: {'action_dit_loss': 0.3961758315563202, ...}
+Step 2, Loss: {'action_dit_loss': 0.24638696014881134, ...}
+```
+
 ## 结论
 
-当前随机初始化可以用于 smoke test，但不推荐作为正式复现实验的默认方案。正式训练建议改成 zero-gate no-op 初始化，使 ShortMEM 在训练开始时等价于原单帧 Qwen3-VL，再通过训练逐步学习历史帧信息。
+随机初始化可以用于 smoke test，但不推荐作为正式复现实验的默认方案。OFTShortMEM 当前已改成 zero-gate no-op 初始化，使 ShortMEM 在训练开始时更接近原单帧 Qwen3-VL，再通过训练逐步学习历史帧信息。

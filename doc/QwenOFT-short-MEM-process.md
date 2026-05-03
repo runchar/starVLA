@@ -200,3 +200,86 @@ datasets:
 - `QwenOFTShortMEM` framework alias 可被 registry 自动导入。
 - 完整 ShortMEM 单元测试通过。
 - 1-step LIBERO 训练 smoke 可跑通并保存 final model。
+
+## OFT zero-gate 更新
+
+后续排查 `action_dit_loss: nan` 时确认，原始 `PatchTemporalCausalAttention` 会把随机初始化的 temporal attention 输出直接加回 visual feature：
+
+```python
+temporal_sequences = temporal_sequences + attended
+```
+
+这对 OFTShortMEM 的正式训练不够稳，尤其是在冻结原 `language_model`、`lm_head` 和 `visual.base_visual`，只训练新增 temporal attention 与 OFT action head 时，随机 temporal 残差会直接扰动预训练 visual feature。
+
+本次已改为 gated residual：
+
+```python
+self.gate = nn.Parameter(torch.tensor(float(gate_init)))
+temporal_sequences = temporal_sequences + self.gate * attended
+```
+
+默认策略：
+
+- `QwenOFTShortMEM` 默认 `temporal_gate_init=0.0`。
+- 其他 ShortMEM framework 默认 `temporal_gate_init=1.0`，尽量保持历史行为。
+- YAML 或命令行可显式覆盖：
+
+```bash
+--framework.qwenvl.shortmem.temporal_gate_init 0.0
+```
+
+新增测试：
+
+```bash
+python -m pytest \
+  tests/test_qwen3_shortmem.py::test_temporal_attention_zero_gate_is_initial_noop \
+  tests/test_qwen3_shortmem.py::test_shortmem_visual_wrapper_can_zero_initialize_temporal_gates \
+  tests/test_qwen3_shortmem.py::test_qwenoft_shortmem_defaults_temporal_gates_to_zero \
+  -q
+```
+
+结果：
+
+```text
+3 passed
+```
+
+完整 ShortMEM 测试：
+
+```bash
+python -m pytest tests/test_qwen3_shortmem.py -q
+```
+
+结果：
+
+```text
+12 passed in 3.48s
+```
+
+## OFT zero-gate temporal train smoke
+
+为了确认不是只靠冻结整个 VLM 跑通，本次又跑了一个 OFTShortMEM smoke：冻结原 `language_model`、`lm_head` 和 `visual.base_visual`，保留新增 `temporal_attn` 与 OFT action head 可训练。
+
+关键参数：
+
+```bash
+--framework.name QwenOFTShortMEM
+--framework.qwenvl.shortmem.history_frames 2
+--framework.qwenvl.shortmem.temporal_interval 4
+--framework.qwenvl.shortmem.prune_after_layer 4
+--framework.qwenvl.shortmem.temporal_gate_init 0.0
+--datasets.vla_data.image_history_frames 2
+--trainer.freeze_modules qwen_vl_interface.model.model.language_model,qwen_vl_interface.model.lm_head,qwen_vl_interface.model.model.visual.base_visual
+--trainer.max_train_steps 2
+```
+
+关键日志：
+
+```text
+LR Group qwen_vl_interface: lr=1e-05, num_params=42
+LR Group action_model: lr=0.0001, num_params=16
+# Parameters (in millions): 2194.747 Total, 67.215 Trainable
+Step 1, Loss: {'action_dit_loss': 0.3961758315563202, ...}
+Step 2, Loss: {'action_dit_loss': 0.24638696014881134, ...}
+Training complete. Final model saved at /tmp/starvla_oft_shortmem_smoke/smoke_qwenoft_shortmem_zero_gate_temporal_train/final_model
+```
