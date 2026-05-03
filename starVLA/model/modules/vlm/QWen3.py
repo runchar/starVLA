@@ -26,6 +26,12 @@ _ACTION_TOKEN_MAX = (
 import torch.nn as nn
 
 
+def _as_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 class _QWen3_VL_Interface(nn.Module):
     """
     This exists because of the diversity of VLMs, so we encapsulate the changes here.
@@ -49,6 +55,12 @@ class _QWen3_VL_Interface(nn.Module):
         qwenvl_config = config.framework.get("qwenvl", {})
         model_id = qwenvl_config.get("base_vlm", "Qwen/Qwen3-VL-4B-Instruct")
         attn_implementation = qwenvl_config.get("attn_implementation", "sdpa")
+        enable_grad_ckpt = _as_bool(
+            qwenvl_config.get(
+                "enable_gradient_checkpointing",
+                config.trainer.get("enable_gradient_checkpointing", False) if hasattr(config, "trainer") else False,
+            )
+        )
 
         # Fallback to sdpa if flash_attention_2 is requested but flash_attn is not installed
         if attn_implementation == "flash_attention_2":
@@ -64,6 +76,20 @@ class _QWen3_VL_Interface(nn.Module):
             dtype=torch.bfloat16,
             ignore_mismatched_sizes=True, # resize image no longer needed? @TODO check bug
         )
+        model.config.use_cache = False
+        if hasattr(model, "generation_config"):
+            model.generation_config.use_cache = False
+        if enable_grad_ckpt:
+            try:
+                model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                if hasattr(model, "enable_input_require_grads"):
+                    model.enable_input_require_grads()
+                print("[QWen3] gradient_checkpointing ENABLED (use_reentrant=False)", flush=True)
+            except TypeError:
+                model.gradient_checkpointing_enable()
+                if hasattr(model, "enable_input_require_grads"):
+                    model.enable_input_require_grads()
+                print("[QWen3] gradient_checkpointing ENABLED", flush=True)
         processor = AutoProcessor.from_pretrained(model_id)
         processor.tokenizer.padding_side = "left"
 

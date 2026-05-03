@@ -160,6 +160,9 @@ class Qwenvl_OFT(baseframework):
                 action_loss (torch.Tensor): Scalar diffusion noise prediction loss.
         """
         batch_images = [example["image"] for example in examples]  #  [B，[PLT]]
+        batch_image_history = (
+            [example.get("image_history") for example in examples] if "image_history" in examples[0] else None
+        )
         instructions = [example["lang"] for example in examples]  # [B, str]
         actions = [example["action"] for example in examples]  # label [B， len, 7]
         state = (
@@ -179,7 +182,11 @@ class Qwenvl_OFT(baseframework):
         instructions = [instruction + prompt_suffix for instruction in instructions]
 
         # Step 1: QWenVL input format
-        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
+            images=batch_images,
+            instructions=instructions,
+            image_history=batch_image_history,
+        )
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
@@ -230,6 +237,11 @@ class Qwenvl_OFT(baseframework):
         if type(examples) is not list:
             examples = [examples]
         batch_images = [to_pil_preserve(example["image"]) for example in examples]  #  [B，[PLT]]
+        batch_image_history = (
+            [to_pil_preserve(example.get("image_history")) for example in examples]
+            if "image_history" in examples[0]
+            else None
+        )
         instructions = [example["lang"] for example in examples]  # [B, str]
         state = (
             [example["state"] for example in examples] if "state" in examples[0] else None
@@ -243,6 +255,8 @@ class Qwenvl_OFT(baseframework):
         train_obs_image_size = getattr(self.config.datasets.vla_data, "obs_image_size", None)
         if train_obs_image_size:
             batch_images = resize_images(batch_images, target_size=train_obs_image_size)
+            if batch_image_history is not None:
+                batch_image_history = resize_images(batch_image_history, target_size=train_obs_image_size)
 
         # step 0: add special action token to instruction
         action_tokens = (
@@ -252,7 +266,11 @@ class Qwenvl_OFT(baseframework):
         instructions = [instruction + prompt_suffix for instruction in instructions]
 
         # Step 1: QWenVL input format
-        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(images=batch_images, instructions=instructions)
+        qwen_inputs = self.qwen_vl_interface.build_qwenvl_inputs(
+            images=batch_images,
+            instructions=instructions,
+            image_history=batch_image_history,
+        )
         with torch.autocast("cuda", dtype=torch.bfloat16):
             qwenvl_outputs = self.qwen_vl_interface(
                 **qwen_inputs,
