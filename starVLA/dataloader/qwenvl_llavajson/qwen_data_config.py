@@ -8,14 +8,27 @@ from pathlib import Path
 
 json_root = f"./playground/Datasets/LLaVA-OneVision-COCO/llava_jsons"
 image_root = f"./playground/Datasets/LLaVA-OneVision-COCO/images"
+vsi590k_root = "./playground/Datasets/VSI-590K"
 
 SHAREGPT4V_COCO = {
     "annotation_path": f"{json_root}/sharegpt4v_coco.json",
     "data_path": f"{image_root}/",
 }
 
+VSI590K_RAW_SMOKE = {
+    "annotation_path": f"{vsi590k_root}/annotations/vsi590k_raw_smoke.jsonl",
+    "data_path": f"{vsi590k_root}/",
+}
+
+VSI590K_STARVLA_SMOKE = {
+    "annotation_path": f"{vsi590k_root}/annotations/vsi590k_starvla_smoke.jsonl",
+    "data_path": f"{vsi590k_root}/",
+}
+
 data_dict = {
     "sharegpt4v_coco": SHAREGPT4V_COCO,
+    "vsi590k_raw_smoke": VSI590K_RAW_SMOKE,
+    "vsi590k_starvla_smoke": VSI590K_STARVLA_SMOKE,
 }
 
 def parse_sampling_rate(dataset_name):
