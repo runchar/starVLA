@@ -20,7 +20,7 @@ class ModelClient:
         horizon: int = 0,
         action_ensemble=True,
         action_ensemble_horizon: Optional[int] = 3,  # different cross sim
-        image_size: list[int] = [224, 224],
+        image_size: Optional[list[int]] = None,
         use_ddim: bool = True,
         num_ddim_steps: int = 10,
         adaptive_ensemble_alpha=0.1,
@@ -36,8 +36,12 @@ class ModelClient:
         print(f"*** policy_setup: {policy_setup}, unnorm_key: {unnorm_key} ***")
         self.use_ddim = use_ddim
         self.num_ddim_steps = num_ddim_steps
+        if horizon <= 0:
+            horizon = self.get_image_history_horizon(policy_ckpt_path=policy_ckpt_path)
+        if image_size is None:
+            image_size = self.get_obs_image_size(policy_ckpt_path=policy_ckpt_path)
         self.image_size = image_size
-        self.horizon = horizon  # 0
+        self.horizon = horizon
         self.action_ensemble = action_ensemble
         self.adaptive_ensemble_alpha = adaptive_ensemble_alpha
         self.action_ensemble_horizon = action_ensemble_horizon
@@ -57,9 +61,25 @@ class ModelClient:
         self.action_norm_stats = self.get_action_stats(self.unnorm_key, policy_ckpt_path=policy_ckpt_path)
         self.action_chunk_size = self.get_action_chunk_size(policy_ckpt_path=policy_ckpt_path)
 
-    def _add_image_to_history(self, image: np.ndarray) -> None:
-        self.image_history.append(image)
+    def _add_image_to_history(self, images: Sequence[np.ndarray]) -> None:
+        if self.horizon <= 1:
+            return
+        self.image_history.append([np.ascontiguousarray(image) for image in images])
         self.num_image_history = min(self.num_image_history + 1, self.horizon)
+
+    def _build_shortmem_history(self) -> Optional[list[list[np.ndarray]]]:
+        if self.horizon <= 1 or len(self.image_history) == 0:
+            return None
+
+        history_steps = list(self.image_history)
+        while len(history_steps) < self.horizon:
+            history_steps.insert(0, history_steps[0])
+
+        num_views = len(history_steps[-1])
+        image_history = []
+        for view_idx in range(num_views):
+            image_history.append([history_steps[t][view_idx] for t in range(self.horizon)])
+        return image_history
 
     def reset(self, task_description: str) -> None:
         self.task_description = task_description
@@ -89,7 +109,12 @@ class ModelClient:
                 self.reset(task_description)
 
         images = [self._resize_image(image) for image in images]
+        self._add_image_to_history(images)
         example["image"] = images
+        image_history = self._build_shortmem_history()
+        if image_history is not None:
+            example["image_history"] = image_history
+
         vla_input = {
             "examples": [example],
             "do_sample": False,
@@ -149,8 +174,24 @@ class ModelClient:
     @staticmethod
     def get_action_chunk_size(policy_ckpt_path):
         model_config, _ = read_mode_config(policy_ckpt_path)  # read config and norm_stats
-        # import ipdb; ipdb.set_trace()
-        return model_config["framework"]["action_model"]["future_action_window_size"] + 1
+        action_cfg = model_config["framework"]["action_model"]
+        if "action_horizon" in action_cfg:
+            return int(action_cfg["action_horizon"])
+        return int(action_cfg["future_action_window_size"]) + 1
+
+    @staticmethod
+    def get_image_history_horizon(policy_ckpt_path):
+        model_config, _ = read_mode_config(policy_ckpt_path)
+        shortmem_cfg = model_config.get("framework", {}).get("qwenvl", {}).get("shortmem", {})
+        if shortmem_cfg.get("history_frames", None) is not None:
+            return int(shortmem_cfg["history_frames"])
+        return int(model_config.get("datasets", {}).get("vla_data", {}).get("image_history_frames", 1))
+
+    @staticmethod
+    def get_obs_image_size(policy_ckpt_path):
+        model_config, _ = read_mode_config(policy_ckpt_path)
+        image_size = model_config.get("datasets", {}).get("vla_data", {}).get("obs_image_size", [224, 224])
+        return [int(image_size[0]), int(image_size[1])]
 
     def _resize_image(self, image: np.ndarray) -> np.ndarray:
         image = cv.resize(image, tuple(self.image_size), interpolation=cv.INTER_AREA)
