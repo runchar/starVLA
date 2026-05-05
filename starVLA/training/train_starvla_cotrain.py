@@ -38,15 +38,23 @@ from starVLA.model.framework.share_tools import apply_config_compat
 from starVLA.training.trainer_utils.config_tracker import AccessTrackedConfig, wrap_config
 from starVLA.training.trainer_utils.trainer_tools import TrainerUtils, build_param_lr_groups, normalize_dotlist_args
 
-deepspeed_plugin = DeepSpeedPlugin()
-accelerator = Accelerator(deepspeed_plugin=deepspeed_plugin)
-accelerator.print(accelerator.state)
-
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Initialize logger
 logger = get_logger(__name__)
+
+
+def create_accelerator(cfg) -> Accelerator:
+    """Create Accelerator after CLI/YAML config merge so trainer overrides take effect."""
+    grad_accum = int(cfg.trainer.get("gradient_accumulation_steps", 1))
+    deepspeed_plugin = DeepSpeedPlugin(gradient_accumulation_steps=grad_accum)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=grad_accum,
+        deepspeed_plugin=deepspeed_plugin,
+    )
+    accelerator.print(accelerator.state)
+    return accelerator
 
 
 def load_fast_tokenizer():
@@ -399,7 +407,7 @@ class VLAMTrainer(TrainerUtils):
         self.accelerator.wait_for_everyone()
 
 
-def main(cfg) -> None:
+def main(cfg, accelerator) -> None:
     logger.info("VLA Training :: Warming Up")
 
     cfg = wrap_config(cfg)
@@ -451,6 +459,8 @@ if __name__ == "__main__":
     # Store source config path for later copying to output dir
     cfg.config_yaml = args.config_yaml
 
+    accelerator = create_accelerator(cfg)
+
     if cfg.is_debug and dist.is_initialized() and dist.get_rank() == 0:
         import debugpy
 
@@ -458,4 +468,4 @@ if __name__ == "__main__":
         print("🔍 Rank 0 waiting for debugger attach on port 10092...")
         debugpy.wait_for_client()
 
-    main(cfg)
+    main(cfg, accelerator)

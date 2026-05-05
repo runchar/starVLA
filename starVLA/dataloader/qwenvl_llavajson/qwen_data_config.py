@@ -25,10 +25,16 @@ VSI590K_STARVLA_SMOKE = {
     "data_path": f"{vsi590k_root}/",
 }
 
+VSI590K_STARVLA_PARTIAL_DOWNLOADED = {
+    "annotation_path": f"{vsi590k_root}/annotations/vsi590k_starvla_smoke.jsonl",
+    "data_path": f"{vsi590k_root}/",
+}
+
 data_dict = {
     "sharegpt4v_coco": SHAREGPT4V_COCO,
     "vsi590k_raw_smoke": VSI590K_RAW_SMOKE,
     "vsi590k_starvla_smoke": VSI590K_STARVLA_SMOKE,
+    "vsi590k_starvla_partial_downloaded": VSI590K_STARVLA_PARTIAL_DOWNLOADED,
 }
 
 def parse_sampling_rate(dataset_name):

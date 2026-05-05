@@ -410,6 +410,114 @@ playground/Datasets/VSI-590K/experiments/vsi590k_cotrain_lmhead_train_20260505_1
 playground/Checkpoints/vsi590k_cotrain_lmhead_train_20260505_192119/final_model/pytorch_model.pt
 ```
 
+### 2026-05-05 19:30
+
+训练目标口径修正：这里的“全量”指全模型参与训练，不是全量下载 VSI-590K 数据。当前训练脚本默认仍使用本机已经下载并验证过的 partial VSI 数据：
+
+```bash
+playground/Datasets/VSI-590K/annotations/vsi590k_starvla_smoke.jsonl
+```
+
+新增全模型 co-training 配置和启动脚本：
+
+```bash
+examples/CoTrainVLM/train_files/starvla_cotrain_vsi590k_partial_full_model.yaml
+examples/CoTrainVLM/train_files/run_vsi590k_partial_full_model_cotrain.sh
+```
+
+脚本默认：
+
+- `freeze_module_list=''`，即 Qwen-VL、action model 等全模型参数都保持可训练。
+- 保留可切换的部分冻结行：
+
+```bash
+#freeze_module_list='qwen_vl_interface.model.model.language_model,qwen_vl_interface.model.lm_head,qwen_vl_interface.model.model.visual.base_visual'
+```
+
+- 数据仍为当前已经落盘并实测通过的 partial 数据，正式 alias 为 `vsi590k_starvla_partial_downloaded`，不会自动切到 236GB 全量 VSI 数据。
+- 默认 DeepSpeed 配置不启用 optimizer offload，避免本机出现过的 CUDA 11.8 与 torch CUDA 12.4 不匹配导致 `DeepSpeedCPUAdam` 编译失败。
+- 启动日志会写入 `${run_root_dir}/${run_id}/train.log`，脚本本身也会复制到同一输出目录，方便之后复现。
+
+同时修正 `starVLA/training/train_starvla_cotrain.py` 的 accelerator 创建时机：现在会在 YAML + CLI merge 之后读取 `trainer.gradient_accumulation_steps`，否则启动脚本中设置的 grad accumulation 在 co-training 入口里不会真实生效。
+
+推荐本机/单卡 smoke：
+
+```bash
+source /home/brl4090/miniconda3/etc/profile.d/conda.sh
+conda activate dfs
+WANDB_MODE=offline \
+num_processes=1 \
+attn_implementation=sdpa \
+max_train_steps=1 \
+save_interval=9999 \
+eval_interval=9999 \
+logging_frequency=1 \
+bash examples/CoTrainVLM/train_files/run_vsi590k_partial_full_model_cotrain.sh
+```
+
+大服务器多卡训练时重点改这些变量：
+
+```bash
+run_id=vsi590k_partial_full_model_server \
+bash examples/CoTrainVLM/train_files/run_vsi590k_partial_full_model_cotrain.sh
+```
+
+`run_vsi590k_partial_full_model_cotrain.sh` 当前已经按单机 8 卡 A100 正式训练设置默认值：
+
+```bash
+num_processes=8
+vla_batch_size=1
+vlm_batch_size=1
+grad_accum=8
+max_train_steps=100000
+save_interval=5000
+eval_interval=1000
+attn_implementation=flash_attention_2
+```
+
+本机单卡全模型 1-step 真启动结果：
+
+```text
+# Parameters (in millions): 2282.713 Total, 2282.713 Trainable
+Gradient accumulation steps = 8
+Total batch size = 8
+```
+
+训练已经进入 VLA forward 和 VLM backward，但 24GB 4090 在 VLM backward 的 ZeRO2 gradient bucket 处 OOM：
+
+```text
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 4.25 GiB.
+GPU 0 has a total capacity of 23.64 GiB of which 2.12 GiB is free.
+```
+
+结论：全模型路径和配置接线能启动；本机单卡不能完成全模型 optimizer step。大服务器上建议先用 `num_processes=8`、`vla_batch_size=1`、`vlm_batch_size=1`、`grad_accum=8`，如果仍 OOM，再启用脚本里保留的部分冻结行或切 ZeRO3。
+
+### 2026-05-06 A100 正式默认配置
+
+已将启动脚本默认值改成单机 8 卡 A100 正式训练口径：
+
+- 默认 `num_processes=8`。
+- 默认 `attn_implementation=flash_attention_2`。
+- 默认 `run_id=vsi590k_partial_full_model_a100_时间戳`。
+- 默认 `freeze_module_list=''`，保持全模型训练。
+- 默认 VLM dataset key 改为 `vsi590k_starvla_partial_downloaded`，仍指向当前已下载并验证过的 partial JSONL，不扩大数据范围。
+
+正式启动命令：
+
+```bash
+source /path/to/conda.sh
+conda activate dfs
+bash examples/CoTrainVLM/train_files/run_vsi590k_partial_full_model_cotrain.sh
+```
+
+如果调度器已经设置 GPU 可见性，不需要额外传 `num_processes`；如果只分配了部分 A100，需要显式覆盖：
+
+```bash
+num_processes=4 \
+run_id=vsi590k_partial_full_model_a100_4gpu \
+bash examples/CoTrainVLM/train_files/run_vsi590k_partial_full_model_cotrain.sh
+```
+
 注意：这不是“全量 VSI-590K 媒体下载”。当前 `playground` 所在盘只剩约 109GB，而 VSI-590K 压缩归档总量超过 230GB；完整下载/解压需要新的大容量目录或分盘布局。
 
 ## 推荐接入方式
@@ -439,9 +547,10 @@ playground/Checkpoints/vsi590k_cotrain_lmhead_train_20260505_192119/final_model/
 - 已完成至少一个 VLM dataloader batch smoke。
 - 已完成 Qwen3-VL VLM forward no-grad smoke。
 - GPU 释放后已完成 1-step co-training optimizer step。
+- 已确认全模型训练脚本能进入全模型 trainable 路径，并且 co-training 入口的 `gradient_accumulation_steps=8` 已真实生效。
 
 仍待验证：
 
-- 全 Qwen 可训练的 1-step co-training。当前被 DeepSpeed CPUAdam 编译环境阻塞。
+- 多卡大服务器上完成全模型 1-step optimizer step；本机单卡 24GB 已在 VLM backward 处 OOM。
 - 分 prefix 扩大样本后，检查长视频/坏视频比例和 dataloader retry 频率。
 - 多卡正式训练时重新评估 DeepSpeed bucket，smoke 小 bucket 只是当前单卡低余量环境的保守配置。
